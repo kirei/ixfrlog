@@ -78,11 +78,9 @@ def ixfrlog(nameserver: str, zone: str, serial: int, file: IO) -> Optional[int]:
                 "ttl": int(rrset.ttl),
                 "rdclass": dns.rdataclass.to_text(rrset.rdclass),
                 "rdtype": dns.rdatatype.to_text(rrset.rdtype),
+                "rdata": [rr.to_text(origin=origin, relativize=False) for rr in rrset],
+                "text": rrset.to_text(origin=origin, relativize=False),
             }
-            if len(rrset) == 1:
-                log_entry["rdata"] = str(rrset[0])
-            else:
-                log_entry["rdata"] = [str(rr) for rr in rrset]
 
             file.write(json.dumps(log_entry) + "\n")
 

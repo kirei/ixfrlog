@@ -6,13 +6,6 @@ import logging
 from collections import defaultdict
 
 
-def change2rr(change: dict):
-    rdata = change["rdata"]
-    if isinstance(rdata, list) and len(rdata) == 1:
-        rdata = rdata[0]
-    return f'{change["name"]} {change["rdclass"]} {change["rdtype"]} {rdata}'
-
-
 def main():
     """Main function"""
 
@@ -69,7 +62,7 @@ def main():
                 continue
 
             modified_names.add(name)
-            v = change2rr(change)
+            v = change["text"]
 
             if change["deleted"]:
                 data_del[name].add(v)
