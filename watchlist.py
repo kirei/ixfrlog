@@ -1,6 +1,7 @@
 """Watch changes in DNX IXFR log"""
 
 import argparse
+import gzip
 import json
 import logging
 from collections import defaultdict
@@ -53,23 +54,29 @@ def main():
     data_add = defaultdict(set)
     modified_names = set()
 
-    with open(args.log, "rt") as input_file:
-        for r in input_file.readlines():
-            change = json.loads(r)
-            name = change["name"]
+    if args.log.endswith(".gz"):
+        input_file = gzip.open(args.log, "rt")
+    else:
+        input_file = open(args.log, "rt")
 
-            if name not in watchlist:
-                continue
+    for r in input_file.readlines():
+        change = json.loads(r)
+        name = change["name"]
 
-            modified_names.add(name)
-            v = change["text"]
+        if name not in watchlist:
+            continue
 
-            if change["deleted"]:
-                data_del[name].add(v)
-                data_add[name].discard(v)
-            else:
-                data_add[name].add(v)
-                data_del[name].discard(v)
+        modified_names.add(name)
+        v = change["text"]
+
+        if change["deleted"]:
+            data_del[name].add(v)
+            data_add[name].discard(v)
+        else:
+            data_add[name].add(v)
+            data_del[name].discard(v)
+
+    input_file.close()
 
     for recipient, domains in domains_per_recipient.items():
         print(f"Report for {recipient}:")
