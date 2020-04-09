@@ -102,7 +102,7 @@ def main():
         dest="state",
         metavar="filename",
         help="State file",
-        default="ixfrlog.json",
+        default="ixfrlog.state",
         required=False,
     )
 
