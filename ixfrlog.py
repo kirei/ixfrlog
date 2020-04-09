@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import sys
 import tempfile
 from typing import Optional
 from typing.io import IO
@@ -116,6 +117,7 @@ def main():
         logging.basicConfig(level=logging.INFO)
 
     logger = logging.getLogger(__name__)
+    exit_status = 0
 
     with open(args.state, "rt") as file:
         state = json.loads(file.read())
@@ -151,9 +153,12 @@ def main():
             os.rename(output_file.name, f"{zone}-{new_serial}.log")
         else:
             os.unlink(output_file.name)
+            exit_status = -1
 
     with open(args.state, "wt") as file:
         file.write(json.dumps(state, indent=4))
+
+    sys.exit(exit_status)
 
 
 if __name__ == "__main__":
