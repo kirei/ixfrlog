@@ -10,7 +10,7 @@ def change2rr(change: dict):
     rdata = change["rdata"]
     if isinstance(rdata, list) and len(rdata) == 1:
         rdata = rdata[0]
-    return (f'{change["name"]} {change["rdclass"]} {change["rdtype"]} {rdata}')
+    return f'{change["name"]} {change["rdclass"]} {change["rdtype"]} {rdata}'
 
 
 def main():
@@ -85,7 +85,7 @@ def main():
                 print(f"  Deleted: {rr}")
             for rr in sorted(data_add[d]):
                 print(f"  Added:   {rr}")
-,ma
+
 
 if __name__ == "__main__":
     main()
