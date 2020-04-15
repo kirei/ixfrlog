@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from typing import Optional
 from typing.io import IO
 
@@ -36,7 +37,13 @@ def name2str(name: dns.name, origin: str) -> str:
     return ".".join([n, str(origin)])
 
 
-def ixfrlog(nameserver: str, zone: str, serial: int, file: IO) -> Optional[int]:
+@dataclass(frozen=True)
+class IXFRresult(object):
+    changes: int = 0
+    serial: Optional[int] = None
+
+
+def ixfrlog(nameserver: str, zone: str, serial: int, file: IO) -> IXFRresult:
     messages = dns.query.xfr(
         where=nameserver, zone=zone, rdtype=dns.rdatatype.IXFR, serial=serial
     )
@@ -44,6 +51,7 @@ def ixfrlog(nameserver: str, zone: str, serial: int, file: IO) -> Optional[int]:
     ixfr_found = False
     first_soa = None
     second_soa = None
+    changes = 0
     for m in messages:
         for rrset in m.answer:
             if rrset.rdtype == dns.rdatatype.SOA:
@@ -68,6 +76,8 @@ def ixfrlog(nameserver: str, zone: str, serial: int, file: IO) -> Optional[int]:
             if not ixfr_found:
                 raise FailedIXFR(serial=first_soa.serial)
 
+            changes += 1
+
             log_owner = name2str(rrset.name, origin)
             log_serial = serial
             log_action = "add" if action_add else "del"
@@ -88,7 +98,7 @@ def ixfrlog(nameserver: str, zone: str, serial: int, file: IO) -> Optional[int]:
             for text in rrset.to_text(origin=origin, relativize=False).split("\n"):
                 logging.debug(f"{log_serial} {log_action.upper()} {text}")
 
-    return serial
+    return IXFRresult(serial=serial, changes=changes)
 
 
 def main():
@@ -129,16 +139,22 @@ def main():
         )
 
         try:
-            new_serial = ixfrlog(
+            res = ixfrlog(
                 nameserver=config["nameserver"],
                 zone=zone,
                 serial=last_serial,
                 file=output_file,
             )
+            new_serial = res.serial
             if last_serial == new_serial:
-                logger.info("No changes for zone=%s serial=%d", zone, new_serial)
+                logger.info("No changes for zone %s serial %d", zone, new_serial)
             else:
-                logger.info("Logged changes for zone=%s serial=%d", zone, new_serial)
+                logger.info(
+                    "Logged %d changes for zone %s serial %d",
+                    res.changes,
+                    zone,
+                    new_serial,
+                )
         except FailedIXFR as exc:
             new_serial = None
             state[zone]["serial"] = exc.serial
