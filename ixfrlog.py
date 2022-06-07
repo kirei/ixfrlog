@@ -166,7 +166,9 @@ def main():
         if new_serial is not None and last_serial != new_serial and output_size > 0:
             state[zone]["serial"] = new_serial
             zone = zone.rstrip(".")
-            os.rename(output_file.name, f"{zone}-{new_serial}.log")
+            filename = f"{zone}-{new_serial}.log"
+            state[zone]["filename"] = filename
+            os.rename(output_file.name, filename)
         else:
             os.unlink(output_file.name)
             exit_status = -1
