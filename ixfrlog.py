@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import socket
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -44,6 +45,8 @@ class IXFRresult(object):
 
 
 def ixfrlog(nameserver: str, zone: str, serial: int, file: IO) -> IXFRresult:
+
+    nameserver = socket.gethostbyname(nameserver)
     messages = dns.query.xfr(
         where=nameserver, zone=zone, rdtype=dns.rdatatype.IXFR, serial=serial
     )
