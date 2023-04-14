@@ -8,15 +8,17 @@ import socket
 import sys
 import tempfile
 from dataclasses import dataclass
-from typing import Optional
-from typing.io import IO
+from typing import IO, Optional
 
 import dns.query
 import dns.rdataclass
 import dns.rdatatype
 import dns.zone
+import paho.mqtt.client as mqtt
 
 TEMPFILE = "ixfrlog."
+
+MQTT_TOPIC = "ixfrlog"
 
 IGNORE_RDATATYPES = [
     dns.rdatatype.SOA,
@@ -44,8 +46,13 @@ class IXFRresult(object):
     serial: Optional[int] = None
 
 
-def ixfrlog(nameserver: str, zone: str, serial: int, file: IO) -> IXFRresult:
-
+def ixfrlog(
+    nameserver: str,
+    zone: str,
+    serial: int,
+    fp: Optional[IO] = None,
+    mqttc: Optional[mqtt.Client] = None,
+) -> IXFRresult:
     nameserver = socket.gethostbyname(nameserver)
     messages = dns.query.xfr(
         where=nameserver, zone=zone, rdtype=dns.rdatatype.IXFR, serial=serial
@@ -85,18 +92,34 @@ def ixfrlog(nameserver: str, zone: str, serial: int, file: IO) -> IXFRresult:
             log_serial = serial
             log_action = "add" if action_add else "del"
 
-            log_entry = {
-                "serial": log_serial,
-                "deleted": not action_add,
-                "name": log_owner,
-                "ttl": int(rrset.ttl),
-                "rdclass": dns.rdataclass.to_text(rrset.rdclass),
-                "rdtype": dns.rdatatype.to_text(rrset.rdtype),
-                "rdata": [rr.to_text(origin=origin, relativize=False) for rr in rrset],
-                "text": rrset.to_text(origin=origin, relativize=False),
-            }
+            if fp:
+                log_entry = {
+                    "serial": log_serial,
+                    "deleted": not action_add,
+                    "name": log_owner,
+                    "ttl": int(rrset.ttl),
+                    "rdclass": dns.rdataclass.to_text(rrset.rdclass),
+                    "rdtype": dns.rdatatype.to_text(rrset.rdtype),
+                    "rdata": [
+                        rr.to_text(origin=origin, relativize=False) for rr in rrset
+                    ],
+                    "text": rrset.to_text(origin=origin, relativize=False),
+                }
+                fp.write(json.dumps(log_entry) + "\n")
 
-            file.write(json.dumps(log_entry) + "\n")
+            if mqttc:
+                message = {
+                    "serial": log_serial,
+                    "deleted": not action_add,
+                    "name": log_owner,
+                    "ttl": int(rrset.ttl),
+                    "rdclass": dns.rdataclass.to_text(rrset.rdclass),
+                    "rdtype": dns.rdatatype.to_text(rrset.rdtype),
+                    "rdata": [
+                        rr.to_text(origin=origin, relativize=False) for rr in rrset
+                    ],
+                }
+                mqttc.publish(f"{MQTT_TOPIC}/{zone}", json.dumps(message))
 
             for text in rrset.to_text(origin=origin, relativize=False).split("\n"):
                 logging.debug(f"{log_serial} {log_action.upper()} {text}")
@@ -111,16 +134,26 @@ def main():
 
     parser.add_argument(
         "--state",
-        dest="state",
         metavar="filename",
         help="State file",
         default="ixfrlog.state",
         required=False,
     )
-
     parser.add_argument(
-        "--debug", dest="debug", action="store_true", help="Enable debugging"
+        "--mqtt",
+        metavar="URL",
+        help="MQTT server URL",
+        required=False,
     )
+    parser.add_argument(
+        "--nameserver",
+        metavar="address",
+        help="Name server",
+        required=False,
+    )
+    parser.add_argument("--log", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--debug", action="store_true", help="Enable debugging")
+    parser.add_argument("zone", nargs="*", help="Zone to track")
 
     args = parser.parse_args()
 
@@ -132,21 +165,37 @@ def main():
     logger = logging.getLogger(__name__)
     exit_status = 0
 
-    with open(args.state, "rt") as file:
-        state = json.loads(file.read())
+    try:
+        with open(args.state, "rt") as fp:
+            state = json.loads(fp.read())
+    except FileNotFoundError:
+        state = {}
+        for zone in args.zone:
+            state[zone] = {"nameserver": args.nameserver}
+
+    if args.mqtt:
+        mqttc = mqtt.Client()
+        mqttc.connect(args.mqtt)
+    else:
+        mqttc = None
 
     for zone, config in state.items():
         last_serial = config.get("serial", 0)
-        output_file = tempfile.NamedTemporaryFile(
-            mode="wt", dir=".", prefix=TEMPFILE, suffix=".tmp", delete=False
-        )
+
+        if args.log:
+            output_fp = tempfile.NamedTemporaryFile(
+                mode="wt", dir=".", prefix=TEMPFILE, suffix=".tmp", delete=False
+            )
+        else:
+            output_fp = None
 
         try:
             res = ixfrlog(
                 nameserver=config["nameserver"],
                 zone=zone,
                 serial=last_serial,
-                file=output_file,
+                fp=output_fp,
+                mqttc=mqttc,
             )
             new_serial = res.serial
             if last_serial == new_serial:
@@ -163,21 +212,30 @@ def main():
             state[zone]["serial"] = exc.serial
             logger.warning("IXFR not available, fast forward to serial %d", exc.serial)
 
-        output_size = os.fstat(output_file.fileno()).st_size
-        output_file.close()
+        if output_fp:
+            output_size = os.fstat(output_fp.fileno()).st_size
+            output_fp.close()
 
-        if new_serial is not None and last_serial != new_serial and output_size > 0:
+        updated = new_serial is not None and last_serial != new_serial
+
+        if updated and res:
             state[zone]["serial"] = new_serial
-            zone = zone.rstrip(".")
-            filename = f"{zone}-{new_serial}.log"
-            state[zone]["filename"] = filename
-            os.rename(output_file.name, filename)
-        else:
-            os.unlink(output_file.name)
-            exit_status = -1
 
-    with open(args.state, "wt") as file:
-        file.write(json.dumps(state, indent=4))
+        if output_fp:
+            if updated and output_size > 0:
+                zone = zone.rstrip(".")
+                filename = f"{zone}-{new_serial}.log"
+                state[zone]["filename"] = filename
+                os.rename(output_fp.name, filename)
+            else:
+                os.unlink(output_fp.name)
+                exit_status = -1
+
+    if mqttc:
+        mqttc.disconnect()
+
+    with open(args.state, "wt") as fp:
+        fp.write(json.dumps(state, indent=4))
 
     sys.exit(exit_status)
 

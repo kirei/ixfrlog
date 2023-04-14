@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "ixfrlog"
+version = "0.0.0"
+description = "IXFR Log Utility"
+authors = ["Jakob Schlyter <jakob@kirei.se>"]
+license = "BSD"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+dnspython = "^2.2.1"
+paho-mqtt = "^1.6.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

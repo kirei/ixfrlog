@@ -13,7 +13,11 @@ def main():
     parser = argparse.ArgumentParser(description="Report changes in IXFR log")
 
     parser.add_argument(
-        "--log", dest="log", metavar="filename", help="IXFR log file", required=True,
+        "--log",
+        dest="log",
+        metavar="filename",
+        help="IXFR log file",
+        required=True,
     )
     parser.add_argument(
         "--watch",
